@@ -1,0 +1,289 @@
+# Rust
+/target/
+**/target/
+**/*.rs.bk
+Cargo.lock
+
+# Rust build artifacts and debug symbols
+*.pdb
+*.dSYM/
+*.so
+*.dylib
+*.dll
+*.exe
+*.rlib
+*.rmeta
+*.ilk
+*.exp
+*.lib
+*.a
+*.o
+*.obj
+
+# Rust test artifacts - CRITICAL: Prevent test framework build artifacts
+/tests/test_framework/target/
+**/tests/**/target/
+**/test_framework/target/
+**/target/debug/
+**/target/release/
+**/target/incremental/
+
+# Specific problematic files from Git LFS error
+**/simple_runner.pdb
+**/comprehensive_runner.pdb
+**/libreqwest-*.rlib
+**/libtokenizers-*.rlib
+**/target/debug/deps/*.pdb
+**/target/debug/deps/*.rlib
+**/target/debug/deps/libreqwest-*.rlib
+**/target/debug/deps/libtokenizers-*.rlib
+**/target/debug/incremental/
+**/target/release/deps/
+**/target/release/build/
+
+# All Rust build outputs
+**/*.rlib
+**/*.rmeta
+**/*.pdb
+**/*.ilk
+**/*.exp
+**/*.lib
+**/*.a
+**/*.o
+**/*.obj
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.rlib *.so *.dylib *.dll *.exe *.pdb *.rlib *.rmeta *.pdb *.ilk *.exp *.lib *.a *.o *.obj *target/
+
+
+# Application data
+/data/
+/exports/
+/logs/
+/models/
+/cache/
+
+# Configuration (keep examples)
+config.toml
+local.toml
+
+# Test artifacts
+/test-output/
+/temp/
+
+# Build artifacts
+/dist/
+/release/
+*.msi
+*.exe
+*.deb
+*.rpm
+
+# Large files and binaries
+*.bin
+*.dat
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Model files and large data
+*.model
+*.weights
+*.h5
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.parquet
+*.feather
+*.arrow
+
+# Compressed files
+*.zip
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.rar
+*.7z
+*.gz
+*.bz2
+*.xz
+
+# Large test data
+/test-data/
+/test_data/
+/large-files/
+/large_files/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Documentation build
+/docs/_build/
+/docs/site/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Windows
+desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.exe
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Development and testing
+/coverage/
+/coverage.xml
+/.nyc_output/
+/.pytest_cache/
+/.mypy_cache/
+/.tox/
+/.venv/
+/venv/
+/env/
+/.env/
+
+# Profiling and benchmarking
+*.prof
+*.flamegraph
+/benchmarks/
+/benchmark-results/
+
+# Documentation build artifacts
+/docs/build/
+/docs/_build/
+/docs/site/
+/docs/.doctrees/
+/docs/.sphinx/
+
+# Package managers
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Rust specific
+Cargo.lock
+**/Cargo.lock
