@@ -210,13 +210,20 @@ impl ScrapingEngine {
         let document = Html::parse_document(&html_content);
         
         // Extract items
-        let items = self.extract_items(&document, plan, url, status_code, response_time).await?;
+        let items = self.extract_items(&document, plan, url, status_code, response_time)?;
         
         Ok(items)
     }
     
-    /// Extract items from HTML document
-    async fn extract_items(
+    /// Extract items from HTML document. Synchronous on purpose: this is
+    /// pure CPU-bound HTML parsing with no I/O, and `scraper::Html`/
+    /// `ElementRef` are not `Send` (they use non-atomic reference
+    /// counting internally). Making this `async fn` - even though it
+    /// never awaited anything meaningful - caused `document`/`element` to
+    /// be captured in a generated Future's state, which broke `Send` for
+    /// any caller that `.await`s this from within a `tokio::spawn`'d
+    /// task (as `execute_complete_workflow` does).
+    fn extract_items(
         &self,
         document: &Html,
         plan: &ScrapePlan,
@@ -234,7 +241,7 @@ impl ScrapingEngine {
             
             // Extract each field
             for field in &plan.rules.fields {
-                match self.extract_field_value(&element, field, source_url).await {
+                match self.extract_field_value(&element, field, source_url) {
                     Ok(Some(value)) => {
                         item_data.insert(field.name.clone(), value);
                     }
@@ -273,7 +280,9 @@ impl ScrapingEngine {
     }
     
     /// Extract value for a single field
-    async fn extract_field_value(
+    /// Extract a single field's value. Synchronous for the same reason as
+    /// `extract_items` above - see its doc comment.
+    fn extract_field_value(
         &self,
         element: &ElementRef<'_>,
         field: &Field,

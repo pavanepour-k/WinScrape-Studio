@@ -1,7 +1,9 @@
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::info;
+#[cfg(not(feature = "api"))]
+use tracing::warn;
 use uuid::Uuid;
 
 pub mod orchestrator;

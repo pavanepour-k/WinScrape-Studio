@@ -4,8 +4,6 @@ use eframe::egui;
 use std::sync::Arc;
 #[cfg(feature = "ui")]
 use tracing::{info, error, debug, warn};
-#[cfg(feature = "ui")]
-use std::collections::HashMap;
 
 #[cfg(feature = "ui")]
 use crate::core::WinScrapeStudio;
@@ -233,7 +231,7 @@ impl WindowsUI {
 
 #[cfg(feature = "ui")]
 impl eframe::App for WindowsUI {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Apply Windows theme
         self.theme.apply(ctx);
         
@@ -464,7 +462,7 @@ impl WindowsUI {
                 ("ui", "Interface", "🎨"),
             ];
             
-            for (id, label, icon) in categories {
+            for (_id, label, icon) in categories {
                 if ui.button(format!("{} {}", icon, label)).clicked() {
                     // Switch to category
                 }
@@ -503,7 +501,7 @@ impl WindowsUI {
                 ("contact", "Contact Support", "📞"),
             ];
             
-            for (id, label, icon) in help_items {
+            for (_id, label, icon) in help_items {
                 if ui.button(format!("{} {}", icon, label)).clicked() {
                     // Show help content
                 }
@@ -552,7 +550,7 @@ impl WindowsUI {
     }
     
     /// Render jobs view
-    fn render_jobs_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn render_jobs_view(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         // If a results viewer is active (populated by "View Results" on a
         // job card), show it instead of the job list. It was previously
         // being populated but never actually rendered anywhere.
@@ -594,7 +592,7 @@ impl WindowsUI {
     }
     
     /// Render settings view
-    fn render_settings_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn render_settings_view(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -862,7 +860,7 @@ impl WindowsUI {
     }
     
     /// Render help view
-    fn render_help_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn render_help_view(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {

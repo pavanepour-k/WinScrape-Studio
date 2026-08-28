@@ -1,7 +1,5 @@
 #[cfg(feature = "ui")]
 use eframe::egui;
-#[cfg(feature = "ui")]
-use std::collections::HashMap;
 
 /// Windows-native theme system with Fluent Design elements
 #[cfg(feature = "ui")]
@@ -175,7 +173,7 @@ impl WindowsTheme {
     }
     
     /// Create Windows-style frame
-    pub fn create_frame(&self, title: &str) -> egui::Frame {
+    pub fn create_frame(&self, _title: &str) -> egui::Frame {
         egui::Frame::group(&egui::Style::default())
             .fill(self.surface_color)
             .stroke(egui::Stroke::new(1.0, self.border_color))

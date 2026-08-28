@@ -217,11 +217,10 @@ impl WindowsLauncher {
         #[cfg(windows)]
         {
             use winapi::um::winreg::{RegCreateKeyA, RegSetValueExA, HKEY_CLASSES_ROOT};
-            use winapi::um::winnt::KEY_SET_VALUE;
             use std::ffi::CString;
             
             let exe_path = env::current_exe()?;
-            let exe_path_str = exe_path.to_string_lossy();
+            let _exe_path_str = exe_path.to_string_lossy();
             
             // Register .wss file extension
             let key_name = CString::new(".wss")?;

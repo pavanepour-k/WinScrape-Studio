@@ -3,7 +3,7 @@ use eframe::egui;
 #[cfg(feature = "ui")]
 use std::sync::Arc;
 #[cfg(feature = "ui")]
-use tracing::{info, error, debug, warn};
+use tracing::{info, error};
 
 #[cfg(feature = "ui")]
 use crate::core::WinScrapeStudio;

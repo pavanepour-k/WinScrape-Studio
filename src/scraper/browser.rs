@@ -7,7 +7,7 @@ use serde_json::Value;
 #[cfg(feature = "browser")]
 use std::time::Duration;
 #[cfg(feature = "browser")]
-use tracing::{debug, warn, error};
+use tracing::{debug, warn};
 #[cfg(feature = "browser")]
 use url::Url;
 

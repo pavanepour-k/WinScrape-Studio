@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tracing::{info, debug};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -17,7 +17,6 @@ use crate::config::DatabaseConfig;
 pub struct StorageManager {
     connection: Arc<Mutex<Connection>>,
     config: DatabaseConfig,
-    prepared_statements: Arc<RwLock<HashMap<String, rusqlite::Statement<'static>>>>,
     performance_metrics: Arc<Mutex<PerformanceMetrics>>,
 }
 
@@ -143,7 +142,6 @@ impl StorageManager {
         let storage = Self {
             connection: Arc::new(Mutex::new(connection)),
             config: config.clone(),
-            prepared_statements: Arc::new(RwLock::new(HashMap::new())),
             performance_metrics: Arc::new(Mutex::new(PerformanceMetrics::default())),
         };
         
@@ -159,12 +157,18 @@ impl StorageManager {
     
     /// Prepare common SQL statements for better performance
     async fn prepare_common_statements(&self) -> Result<()> {
-        let _conn = self.connection.lock().await;
-        let _statements = self.prepared_statements.write().await;
-        
-        // Note: In a real implementation, you'd need to handle the lifetime issues
-        // with prepared statements. For now, we'll use dynamic queries.
-        info!("Prepared common SQL statements for performance optimization");
+        // Note: rusqlite's `Statement<'conn>` borrows from its `Connection`
+        // and isn't Send/Sync, so it can't be cached in a struct field
+        // without unsafe lifetime extension. An earlier attempt at this
+        // declared a `prepared_statements: HashMap<String,
+        // Statement<'static>>` field to cache them, but it was never
+        // actually populated (this function was a no-op stub) - and once
+        // something (the actix-web API server) actually needed
+        // `WinScrapeStudio` to be `Send + Sync` across threads, that
+        // field's `'static` statement handles broke the build. Removed;
+        // this app uses dynamic (re-prepared-per-call) queries throughout
+        // instead, which is simpler and doesn't have this problem.
+        info!("Using dynamic (non-cached) SQL statement preparation");
         Ok(())
     }
     

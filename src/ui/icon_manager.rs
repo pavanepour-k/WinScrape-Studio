@@ -7,7 +7,7 @@ use std::fs;
 #[cfg(feature = "ui")]
 use anyhow::Result;
 #[cfg(feature = "ui")]
-use tracing::{info, error, warn};
+use tracing::{info, error};
 #[cfg(feature = "ui")]
 use serde::{Serialize, Deserialize};
 

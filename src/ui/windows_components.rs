@@ -1,7 +1,5 @@
 #[cfg(feature = "ui")]
 use eframe::egui;
-#[cfg(feature = "ui")]
-use std::collections::HashMap;
 
 /// If `current_path` looks like an existing file, return its parent
 /// directory to open the picker dialog there; if it looks like an
@@ -35,7 +33,7 @@ impl WindowsComponents {
             ui.add_space(16.0);
             
             for (id, label, icon) in views {
-                let is_selected = current_view == *id;
+                let _is_selected = current_view == *id;
                 let button_text = format!("{} {}", icon, label);
                 
                 let button = egui::Button::new(button_text)
@@ -207,7 +205,7 @@ impl WindowsComponents {
     }
     
     /// Create a Windows-style action button
-    pub fn action_button(ui: &mut egui::Ui, text: &str, primary: bool) -> egui::Response {
+    pub fn action_button(ui: &mut egui::Ui, text: &str, _primary: bool) -> egui::Response {
         let button = egui::Button::new(text).min_size(egui::Vec2::new(100.0, 32.0));
         ui.add(button)
     }
