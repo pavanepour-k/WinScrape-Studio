@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,17 +39,21 @@ pub struct LLMConfig {
     /// cost. If Ollama isn't installed/running, or a request fails for
     /// any reason, generation transparently falls back to the rule-based
     /// approach rather than failing the whole request.
+    #[serde(default = "default_enable_ollama")]
     pub enable_ollama: bool,
     /// Base URL of the local Ollama server (default install listens on
     /// localhost:11434).
+    #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
     /// Model name to request from Ollama, e.g. "llama3.2" or "qwen2.5".
     /// The user must have pulled this model themselves (`ollama pull
     /// <model>`) - this app doesn't download models on its own.
+    #[serde(default = "default_ollama_model")]
     pub ollama_model: String,
     /// Request timeout in seconds for a single Ollama call. Local
     /// inference on modest hardware can be slow, especially for the
     /// first request after the model is loaded into memory.
+    #[serde(default = "default_ollama_timeout_seconds")]
     pub ollama_timeout_seconds: u64,
     /// Whether to attempt in-process GGUF inference via candle (only
     /// compiled in when built with `--features local-llm`). Tried before
@@ -60,11 +64,19 @@ pub struct LLMConfig {
     /// metadata is required - most current Llama 3.x/Qwen2.x/Mistral
     /// GGUF conversions satisfy this, but older SentencePiece-tokenizer
     /// GGUFs like the original Llama 2 conversions do not).
+    #[serde(default)]
     pub enable_candle: bool,
     /// Random seed for candle's sampler. Fixed by default for
     /// reproducible output; set to a random value if variety is wanted.
+    #[serde(default = "default_candle_seed")]
     pub candle_seed: u64,
 }
+
+fn default_enable_ollama() -> bool { true }
+fn default_ollama_url() -> String { "http://localhost:11434".to_string() }
+fn default_ollama_model() -> String { "llama3.2".to_string() }
+fn default_ollama_timeout_seconds() -> u64 { 30 }
+fn default_candle_seed() -> u64 { 299792458 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScrapingConfig {
@@ -85,6 +97,7 @@ pub struct ExportConfig {
     pub max_file_size_mb: usize,
     pub compression_enabled: bool,
     pub output_directory: PathBuf,
+    #[serde(default = "default_true")]
     pub include_metadata: bool,
 }
 
@@ -118,10 +131,18 @@ pub struct UIConfig {
     pub window_height: f32,
     pub enable_dark_mode: bool,
     pub chat_history_limit: usize,
+    #[serde(default = "default_true")]
     pub auto_save: bool,
+    #[serde(default = "default_true")]
     pub enable_notifications: bool,
+    #[serde(default)]
     pub minimize_to_tray: bool,
 }
+
+/// Shared `true` default for `#[serde(default = "default_true")]` fields
+/// added to config structs over time - keeps old config.toml files (from
+/// before a field existed) loading instead of hard-failing to parse.
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
@@ -231,7 +252,33 @@ impl AppConfig {
         let config_path = get_config_path();
         
         let mut config = if config_path.exists() {
-            Self::load_from_file(&config_path).await?
+            match Self::load_from_file(&config_path).await {
+                Ok(config) => config,
+                Err(e) => {
+                    // A config.toml that fails to parse (e.g. left over
+                    // from an older version of the app with a different
+                    // set of fields, or hand-edited into an invalid
+                    // state) used to make the app fail to start on every
+                    // launch with no way to recover short of manually
+                    // finding and deleting/fixing the file. Falling back
+                    // to defaults is much friendlier - the user's actual
+                    // saved settings are lost, but the app starts, and
+                    // the very next "Save Settings" (or the fallback
+                    // itself, right below) overwrites the broken file
+                    // with a valid one.
+                    warn!(
+                        "Failed to load configuration from {}: {}. Falling back to defaults \
+                         (this can happen after an app update changed the config format). \
+                         Your previous settings were not applied, but the file was not deleted \
+                         either - saving settings again will overwrite it with a valid one.",
+                        config_path.display(),
+                        e
+                    );
+                    let config = Self::default();
+                    config.save().await?;
+                    config
+                }
+            }
         } else {
             info!("No configuration file found, using defaults");
             let config = Self::default();
