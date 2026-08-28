@@ -2,15 +2,46 @@ use anyhow::Result;
 use tracing::{warn, debug};
 use crate::dsl::{ScrapePlan, Target, Rules, Field, SelectorType, ExtractionMethod, Transform, Pagination, PaginationMethod, AntiBlocking, Output, OutputFormat, Filter, FilterCondition};
 use url::Url;
+use regex::Regex;
 
 /// DSL validator for comprehensive validation of scrape plans
 pub struct DSLValidator {
-    // Simple validation without complex regex patterns
+    /// Allowed-character format checks for CSS selectors, XPath
+    /// expressions, and URLs. An earlier attempt at this (still visible in
+    /// git history as validator_final.rs/validator_fixed.rs) had a broken
+    /// raw string literal - it wrote `r"...|""']+$"`, and since a `r"..."`
+    /// raw string ends at the *first* unescaped `"`, that literal actually
+    /// terminated partway through the character class, leaving `"']+$")`
+    /// as trailing tokens that didn't parse as valid Rust. This version
+    /// uses `r#"..."#` so a literal `"` can appear inside the pattern.
+    css_selector_regex: Regex,
+    xpath_regex: Regex,
+    url_regex: Regex,
 }
 
 impl DSLValidator {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            // Allowed characters in a CSS selector: letters, digits,
+            // whitespace, and the common selector/combinator punctuation
+            // (. # [ ] : ( ) - _ , > ~ + * = ^ $ | and quote characters
+            // used in attribute-value selectors like [type="text"]), plus
+            // punctuation that legitimately shows up inside quoted
+            // attribute values (/ ? % ! @ ; e.g. [href*="/p?ref=1"]).
+            // This is ASCII-only and deliberately used as a *warning*
+            // signal rather than a hard reject in validate_selector,
+            // since attribute-value selectors can quote almost any
+            // string, including non-ASCII text when targeting non-English
+            // sites (e.g. [lang="한국어"]), which would otherwise false-
+            // positive against a strict allow-list.
+            css_selector_regex: Regex::new(r#"^[a-zA-Z0-9\s\.\#\[\]\:\(\)\-_,>~\+\*=\^$|"'/%!?@;]+$"#)
+                .expect("css_selector_regex pattern is valid"),
+            // Allowed characters in an XPath expression.
+            xpath_regex: Regex::new(r#"^[a-zA-Z0-9\s/\.\@\[\]\(\)\-_=\^$|"':%!?;]+$"#)
+                .expect("xpath_regex pattern is valid"),
+            url_regex: Regex::new(r"^https?://[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}(/.*)?$")
+                .expect("url_regex pattern is valid"),
+        }
     }
     
     /// Validate a complete scrape plan
@@ -197,6 +228,20 @@ impl DSLValidator {
                 if selector.contains("script") || selector.contains("style") {
                     warn!("Selector contains potentially dangerous elements: {}", selector);
                 }
+                
+                // Flag selectors containing characters that don't appear
+                // in typical CSS selector syntax. This is a warning, not
+                // a hard rejection: attribute-value selectors can quote
+                // almost any string (including non-ASCII text for
+                // non-English sites), so a strict allow-list has a real
+                // false-positive risk and shouldn't fail an otherwise
+                // valid scrape plan on its own.
+                if !self.css_selector_regex.is_match(selector) {
+                    warn!(
+                        "CSS selector contains unusual characters for a selector, double check it's correct: {}",
+                        selector
+                    );
+                }
             }
             SelectorType::XPath => {
                 // Basic XPath validation
@@ -207,6 +252,13 @@ impl DSLValidator {
                 // Check for potentially dangerous XPath expressions
                 if selector.contains("//script") || selector.contains("//style") {
                     warn!("XPath selector contains potentially dangerous elements: {}", selector);
+                }
+                
+                if !self.xpath_regex.is_match(selector) {
+                    warn!(
+                        "XPath selector contains unusual characters for an XPath expression, double check it's correct: {}",
+                        selector
+                    );
                 }
             }
         }
@@ -395,7 +447,7 @@ impl DSLValidator {
             }
             
             for proxy_url in &proxy.proxies {
-                if !proxy_url.starts_with("http://") && !proxy_url.starts_with("https://") {
+                if !self.url_regex.is_match(proxy_url) {
                     return Err(anyhow::anyhow!("Invalid proxy URL format: {}", proxy_url));
                 }
             }

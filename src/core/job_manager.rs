@@ -6,11 +6,13 @@ use tracing::{info, warn, error};
 use chrono::{DateTime, Utc};
 
 use crate::storage::{StorageManager, JobStatus, JobResult};
+use crate::scraper::ScrapingEngine;
 use crate::dsl::ScrapePlan;
 
 /// Manages job execution and lifecycle
 pub struct JobManager {
     storage: Arc<StorageManager>,
+    scraper: Arc<ScrapingEngine>,
     active_jobs: HashMap<String, JobHandle>,
     job_queue: Vec<QueuedJob>,
     max_concurrent_jobs: usize,
@@ -41,9 +43,10 @@ pub enum JobPriority {
 }
 
 impl JobManager {
-    pub fn new(storage: Arc<StorageManager>) -> Self {
+    pub fn new(storage: Arc<StorageManager>, scraper: Arc<ScrapingEngine>) -> Self {
         Self {
             storage,
+            scraper,
             active_jobs: HashMap::new(),
             job_queue: Vec::new(),
             max_concurrent_jobs: 3, // Configurable limit
@@ -110,6 +113,7 @@ impl JobManager {
         // Spawn job execution task
         let job_id_clone = job_id.to_string();
         let storage_clone = self.storage.clone();
+        let scraper_clone = self.scraper.clone();
         
         // Execute job in a separate task
         // Note: We need to handle the fact that scraper crate types are not Send.
@@ -118,6 +122,7 @@ impl JobManager {
             &job_id_clone,
             dsl,
             storage_clone.clone(),
+            scraper_clone,
             cancel_rx,
         ).await;
         
@@ -218,23 +223,44 @@ async fn execute_scraping_job(
     job_id: &str,
     dsl: ScrapePlan,
     storage: Arc<StorageManager>,
+    scraper: Arc<ScrapingEngine>,
     mut cancel_rx: mpsc::Receiver<()>,
 ) -> Result<()> {
     info!("Executing scraping for job: {}", job_id);
     
-    // Initialize scraping engine (this would normally be passed in)
-    let scraping_config = crate::config::ScrapingConfig::default();
-    let scraper = crate::scraper::ScrapingEngine::new(&scraping_config).await?;
-    
-    // Execute scraping with cancellation support
+    // Execute scraping with cancellation support. `scraper` is the engine
+    // shared by the whole app, built once from the user's real
+    // ScrapingConfig (see WinScrapeStudio::new) - previously this function
+    // built a brand new engine from ScrapingConfig::default() instead,
+    // silently ignoring any concurrency/robots.txt/browser-fallback/user-
+    // agent settings the user had configured.
     let scraping_future = scraper.execute_scraping(&dsl);
     let cancellation_future = cancel_rx.recv();
     
     tokio::select! {
         result = scraping_future => {
             match result {
-                Ok(results) => {
-                    info!("Scraping completed for job: {}, {} results", job_id, results.len());
+                Ok(raw_results) => {
+                    info!("Scraping completed for job: {}, {} raw results", job_id, raw_results.len());
+                    
+                    // Run results through the post-processing pipeline
+                    // (validation, deduplication, field transforms, and
+                    // normalization e.g. price/url cleanup). This pipeline
+                    // existed but was never invoked anywhere, so raw,
+                    // unnormalized, un-deduplicated results were being
+                    // stored directly.
+                    let pipeline = crate::core::pipeline::ScrapingPipeline::new(
+                        crate::core::pipeline::PipelineConfig::default(),
+                    );
+                    let pipeline_input = crate::core::pipeline::PipelineData {
+                        items: raw_results,
+                        metadata: std::collections::HashMap::new(),
+                        stage_info: Vec::new(),
+                    };
+                    let processed = pipeline.process(pipeline_input).await?;
+                    let results = processed.items;
+                    
+                    info!("Pipeline processing completed for job: {}, {} final results", job_id, results.len());
                     
                     // Store results
                     for (idx, result) in results.into_iter().enumerate() {

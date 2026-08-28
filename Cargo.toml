@@ -29,6 +29,14 @@ playwright = { version = "0.0.20", optional = true }
 eframe = { version = "0.24", optional = true }
 egui = { version = "0.24", optional = true }
 egui_extras = { version = "0.24", optional = true }
+rfd = { version = "0.14", optional = true }
+
+# Local LLM inference (optional - runs a quantized GGUF model in-process
+# via candle, no external server or API key needed). Off by default: it
+# pulls in a fairly heavy dependency tree and requires the user to supply
+# their own GGUF model file, so it shouldn't affect the default build.
+candle-core = { version = "0.11", optional = true }
+candle-transformers = { version = "0.11", optional = true }
 
 # LLM Integration (simplified for now)
 tokenizers = "0.15"
@@ -45,6 +53,10 @@ toml = "0.8"
 
 # Export formats
 csv = "1.3"
+rust_xlsxwriter = "0.99"
+parquet = { version = "59.2", default-features = false, features = ["arrow", "snap"] }
+arrow-json = "59.2"
+arrow-schema = "59.2"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
@@ -112,10 +124,11 @@ harness = false
 
 [features]
 default = ["ui", "http-only"]
-ui = ["eframe", "egui", "egui_extras"]
+ui = ["eframe", "egui", "egui_extras", "rfd"]
 browser = ["playwright"]
 api = ["actix-web", "actix-rt"]
 http-only = []
+local-llm = ["candle-core", "candle-transformers"]
 full = ["ui", "browser", "api"]
 
 [[bin]]

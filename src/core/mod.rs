@@ -59,7 +59,7 @@ impl WinScrapeStudio {
         
         // Initialize job manager
         let job_manager = Arc::new(RwLock::new(
-            job_manager::JobManager::new(storage.clone())
+            job_manager::JobManager::new(storage.clone(), scraper.clone())
         ));
         info!("Job manager initialized");
         
@@ -164,6 +164,31 @@ impl WinScrapeStudio {
         self.execute_scraping(&dsl).await
     }
     
+    /// Get a snapshot of the current configuration. Used by the GUI
+    /// Settings screen to show real values instead of a disconnected
+    /// hardcoded default.
+    pub fn get_config(&self) -> AppConfig {
+        self.config.clone()
+    }
+    
+    /// Get stored results for a job
+    pub async fn get_job_results(&self, job_id: &str) -> Result<Vec<serde_json::Value>> {
+        self.storage.get_job_results(job_id).await
+    }
+    
+    /// Cancel a running job
+    pub async fn cancel_job(&self, job_id: &str) -> Result<()> {
+        info!("Cancelling job: {}", job_id);
+        let mut job_manager = self.job_manager.write().await;
+        job_manager.cancel_job(job_id).await
+    }
+    
+    /// Delete a job and its stored results
+    pub async fn delete_job(&self, job_id: &str) -> Result<()> {
+        info!("Deleting job: {}", job_id);
+        self.storage.delete_job(job_id).await
+    }
+    
     /// Export job results
     pub async fn export_job(&self, job_id: &str, output_path: &str, format: ExportFormat) -> Result<()> {
         info!("Exporting job {} to {}", job_id, output_path);
@@ -186,17 +211,18 @@ impl WinScrapeStudio {
     
     /// Run in headless mode
     pub async fn run_headless(&self) -> Result<()> {
-        info!("Running in headless mode - use CLI interface");
+        info!("Running in headless mode");
         
         // Keep the application running for potential API access
         #[cfg(feature = "api")]
         {
+            info!("API feature enabled - starting local API server (use CLI for one-off commands instead)");
             self.start_api_server().await?;
         }
         
         #[cfg(not(feature = "api"))]
         {
-            warn!("No API feature enabled - application will exit");
+            warn!("No API feature enabled - application will exit. Use the wss-cli binary for one-off commands.");
         }
         
         Ok(())
@@ -205,9 +231,21 @@ impl WinScrapeStudio {
     /// Start optional API server
     #[cfg(feature = "api")]
     async fn start_api_server(&self) -> Result<()> {
-        // API server implementation should be handled in main.rs
-        // This is just a placeholder to maintain the API
-        info!("API server requested - implementation should be in main.rs");
+        let app = self.clone_for_api().await?;
+        let host = self.config.api.host.clone();
+        let port = self.config.api.port;
+        
+        info!("Starting API server on {}:{}", host, port);
+        
+        actix_web::HttpServer::new(move || {
+            actix_web::App::new()
+                .app_data(actix_web::web::Data::new(app.clone()))
+                .configure(crate::api::configure_routes)
+        })
+        .bind((host.as_str(), port))?
+        .run()
+        .await?;
+        
         Ok(())
     }
     

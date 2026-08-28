@@ -1,6 +1,5 @@
 use anyhow::Result;
-use tracing::{info, error};
-use std::sync::Arc;
+use tracing::{info, error, warn};
 
 #[cfg(feature = "ui")]
 use eframe::egui;
@@ -21,7 +20,9 @@ mod i18n;
 #[cfg(feature = "api")]
 mod api;
 
+#[cfg(not(feature = "ui"))]
 use crate::core::WinScrapeStudio;
+#[cfg(not(feature = "ui"))]
 use crate::config::AppConfig;
 use crate::logging::{LoggingConfig, LogContext, RequestIdGenerator};
 
@@ -32,19 +33,16 @@ async fn main() -> Result<()> {
     
     info!("Starting WinScrape Studio v{}", env!("CARGO_PKG_VERSION"));
     
-    // Load configuration
-    let config = AppConfig::load().await?;
-    info!("Configuration loaded successfully");
-    
-    // Initialize the core application
-    let mut app = WinScrapeStudio::new(config).await?;
-    info!("Core application initialized");
-    
     // Start the UI
     #[cfg(feature = "ui")]
     {
+        // WindowsApp loads its own configuration and initializes the core
+        // application internally (see WindowsApp::initialize), so we don't
+        // create a separate WinScrapeStudio instance here. Doing so
+        // previously caused the app to be initialized twice (duplicate
+        // storage/config setup) with the first instance never used.
         info!("Starting Windows GUI interface");
-        
+
         let mut windows_app = crate::ui::windows_app::WindowsApp::new();
         if let Err(e) = windows_app.initialize().await {
             error!("Failed to initialize GUI: {}", e);
@@ -55,10 +53,19 @@ async fn main() -> Result<()> {
             return Err(anyhow::anyhow!("GUI execution failed: {}", e));
         }
     }
-    
+
     #[cfg(not(feature = "ui"))]
     {
         warn!("GUI feature not enabled, running in headless mode");
+
+        // Load configuration
+        let config = AppConfig::load().await?;
+        info!("Configuration loaded successfully");
+
+        // Initialize the core application
+        let app = WinScrapeStudio::new(config).await?;
+        info!("Core application initialized");
+
         app.run_headless().await?;
     }
     

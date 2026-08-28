@@ -174,13 +174,19 @@ impl DomainWhitelist {
     pub fn is_dangerous_domain(&self, domain: &str) -> bool {
         let normalized = self.normalize_domain(domain);
         
-        // Check for localhost and internal addresses
-        if normalized == "localhost" || 
-           normalized == "127.0.0.1" || 
-           normalized.starts_with("192.168.") ||
-           normalized.starts_with("10.") ||
-           normalized.starts_with("172.") {
+        // Check for localhost and internal/private IP addresses. Uses
+        // std::net's proper RFC1918 range checks rather than string
+        // prefixes - a prefix check on "172." would incorrectly flag the
+        // entire 172.0.0.0/8 range (including many real public IPs, e.g.
+        // ones behind Cloudflare) instead of just the private
+        // 172.16.0.0/12 block.
+        if normalized == "localhost" {
             return true;
+        }
+        if let Ok(std::net::IpAddr::V4(v4)) = normalized.parse::<std::net::IpAddr>() {
+            if v4.is_loopback() || v4.is_private() || v4.is_link_local() {
+                return true;
+            }
         }
         
         // Check for suspicious TLDs

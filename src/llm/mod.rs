@@ -1,8 +1,10 @@
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{info, warn, debug};
 
 pub mod prompts;
 pub mod processor;
+#[cfg(feature = "local-llm")]
+pub mod candle_backend;
 
 use crate::config::LLMConfig;
 use crate::dsl::ScrapePlan;
@@ -10,25 +12,252 @@ use crate::dsl::ScrapePlan;
 /// LLM processor for natural language to DSL conversion
 pub struct LLMProcessor {
     config: LLMConfig,
+    http_client: reqwest::Client,
+}
+
+/// Ollama's /api/generate request body (see
+/// https://github.com/ollama/ollama/blob/main/docs/api.md).
+#[derive(serde::Serialize)]
+struct OllamaGenerateRequest<'a> {
+    model: &'a str,
+    prompt: &'a str,
+    stream: bool,
+    options: OllamaOptions,
+}
+
+#[derive(serde::Serialize)]
+struct OllamaOptions {
+    temperature: f32,
+    num_predict: usize,
+}
+
+/// Ollama's /api/generate response body (with stream: false, this is a
+/// single complete JSON object rather than a stream of chunks).
+#[derive(serde::Deserialize)]
+struct OllamaGenerateResponse {
+    response: String,
 }
 
 impl LLMProcessor {
     /// Create new LLM processor
     pub async fn new(config: &LLMConfig) -> Result<Self> {
-        info!("Initializing LLM processor (simplified implementation)");
+        info!("Initializing LLM processor");
         
-        // For now, we'll use a simplified implementation without actual LLM
-        // In a full implementation, you would integrate with llama.cpp or similar
+        #[cfg(feature = "local-llm")]
+        if config.enable_candle {
+            info!(
+                "Local GGUF inference via candle is enabled (model: {}). Tried before Ollama; \
+                 falls back automatically if the model file is missing/unsupported.",
+                config.model_path.display()
+            );
+        }
+        #[cfg(not(feature = "local-llm"))]
+        if config.enable_candle {
+            warn!("llm.enable_candle is set but this build doesn't include the 'local-llm' feature - ignoring.");
+        }
+        
+        if config.enable_ollama {
+            info!(
+                "Real LLM generation via Ollama is enabled (server: {}, model: {}). \
+                 Falls back to rule-based generation if Ollama is unreachable.",
+                config.ollama_url, config.ollama_model
+            );
+        } else {
+            info!("Ollama integration disabled");
+        }
+        
+        if !config.enable_candle && !config.enable_ollama {
+            info!("No real LLM backend enabled - using rule-based DSL generation only");
+        }
+        
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(config.ollama_timeout_seconds))
+            .build()?;
         
         info!("LLM processor initialized successfully");
         Ok(Self {
             config: config.clone(),
+            http_client,
         })
+    }
+    
+    /// Ask a local Ollama server to generate a DSL scraping plan for the
+    /// given natural-language description. Returns `Ok(None)` (not an
+    /// error) when Ollama integration is disabled, so callers can treat
+    /// "disabled" and "unavailable" uniformly as "fall back to rules".
+    async fn try_ollama_generate_dsl(&self, description: &str) -> Result<Option<ScrapePlan>> {
+        if !self.config.enable_ollama {
+            return Ok(None);
+        }
+        
+        let prompt = prompts::build_dsl_generation_prompt(description);
+        let url = format!("{}/api/generate", self.config.ollama_url.trim_end_matches('/'));
+        
+        debug!("Requesting DSL generation from Ollama at {}", url);
+        
+        let response = self.http_client
+            .post(&url)
+            .json(&OllamaGenerateRequest {
+                model: &self.config.ollama_model,
+                prompt: &prompt,
+                stream: false,
+                options: OllamaOptions {
+                    temperature: self.config.temperature,
+                    num_predict: self.config.max_tokens,
+                },
+            })
+            .send()
+            .await;
+        
+        let response = match response {
+            Ok(r) => r,
+            Err(e) => {
+                // Ollama not installed/running, or unreachable - this is
+                // an expected, common case (most users won't have it
+                // set up), so this is a debug/warn, not an error.
+                warn!("Could not reach Ollama at {}: {}. Falling back to rule-based generation.", self.config.ollama_url, e);
+                return Ok(None);
+            }
+        };
+        
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            warn!(
+                "Ollama returned an error (status {}): {}. Falling back to rule-based generation.",
+                status, body
+            );
+            return Ok(None);
+        }
+        
+        let body: OllamaGenerateResponse = match response.json().await {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("Could not parse Ollama's response: {}. Falling back to rule-based generation.", e);
+                return Ok(None);
+            }
+        };
+        
+        let yaml = match self.extract_dsl_from_response(&body.response) {
+            Ok(y) => y,
+            Err(e) => {
+                warn!("Could not extract a DSL plan from Ollama's response: {}. Falling back to rule-based generation.", e);
+                return Ok(None);
+            }
+        };
+        
+        match crate::dsl::parser::DSLParser::parse_yaml(&yaml) {
+            Ok(plan) => {
+                info!("Ollama generated a usable DSL plan");
+                Ok(Some(plan))
+            }
+            Err(e) => {
+                warn!("Ollama's generated DSL didn't parse as a valid plan: {}. Falling back to rule-based generation.", e);
+                Ok(None)
+            }
+        }
+    }
+    
+    /// Attempt DSL generation using an in-process candle GGUF model
+    /// (only compiled in with `--features local-llm`). Returns `Ok(None)`
+    /// (not an error) when disabled or unavailable, same convention as
+    /// `try_ollama_generate_dsl`, so callers can fall through uniformly.
+    #[cfg(feature = "local-llm")]
+    async fn try_candle_generate_dsl(&self, description: &str) -> Result<Option<ScrapePlan>> {
+        if !self.config.enable_candle {
+            return Ok(None);
+        }
+        
+        let prompt = prompts::build_dsl_generation_prompt(description);
+        let config = self.config.clone();
+        
+        // candle's inference loop is synchronous and CPU-bound (no .await
+        // points inside it), so it has to run on a blocking thread rather
+        // than the async runtime, same as the xlsx/parquet exporters.
+        let generation = tokio::task::spawn_blocking(move || {
+            candle_backend::generate(&config, &prompt)
+        })
+        .await;
+        
+        let text = match generation {
+            Ok(Ok(text)) => text,
+            Ok(Err(e)) => {
+                warn!("Local GGUF generation failed: {}. Falling back.", e);
+                return Ok(None);
+            }
+            Err(e) => {
+                warn!("Local GGUF generation task panicked: {}. Falling back.", e);
+                return Ok(None);
+            }
+        };
+        
+        let yaml = match self.extract_dsl_from_response(&text) {
+            Ok(y) => y,
+            Err(e) => {
+                warn!("Could not extract a DSL plan from the local model's output: {}. Falling back.", e);
+                return Ok(None);
+            }
+        };
+        
+        match crate::dsl::parser::DSLParser::parse_yaml(&yaml) {
+            Ok(plan) => {
+                info!("Local GGUF model generated a usable DSL plan");
+                Ok(Some(plan))
+            }
+            Err(e) => {
+                warn!("Local model's generated DSL didn't parse as a valid plan: {}. Falling back.", e);
+                Ok(None)
+            }
+        }
+    }
+    
+    /// No-op stand-in when built without the local-llm feature, so
+    /// generate_dsl's call site doesn't need its own cfg-gating.
+    #[cfg(not(feature = "local-llm"))]
+    async fn try_candle_generate_dsl(&self, _description: &str) -> Result<Option<ScrapePlan>> {
+        Ok(None)
     }
     
     /// Generate DSL from natural language description
     pub async fn generate_dsl(&self, description: &str) -> Result<ScrapePlan> {
         info!("Generating DSL from description: {}", description);
+        
+        // Try local, in-process GGUF inference first (free, no network
+        // call at all, but requires the user to have built with
+        // --features local-llm and pointed llm.model_path at a
+        // compatible GGUF file - see candle_backend.rs). Then a local
+        // Ollama server. Either produces None (not an error) when
+        // unavailable/disabled/failed, so we fall through to the
+        // rule-based generator - the safety net that's always available.
+        match self.try_candle_generate_dsl(description).await {
+            Ok(Some(mut plan)) => {
+                plan.add_metadata("generated_by".to_string(), serde_json::Value::String("candle".to_string()));
+                plan.add_metadata("user_prompt".to_string(), serde_json::Value::String(description.to_string()));
+                info!("DSL generated by local GGUF model with {} fields", plan.rules.fields.len());
+                return Ok(plan);
+            }
+            Ok(None) => {
+                debug!("Local GGUF inference unavailable or declined to produce a usable plan; trying Ollama");
+            }
+            Err(e) => {
+                warn!("Unexpected error during local GGUF inference: {}. Trying Ollama.", e);
+            }
+        }
+        
+        match self.try_ollama_generate_dsl(description).await {
+            Ok(Some(mut plan)) => {
+                plan.add_metadata("generated_by".to_string(), serde_json::Value::String("ollama".to_string()));
+                plan.add_metadata("user_prompt".to_string(), serde_json::Value::String(description.to_string()));
+                info!("DSL generated by Ollama with {} fields", plan.rules.fields.len());
+                return Ok(plan);
+            }
+            Ok(None) => {
+                debug!("Ollama unavailable or declined to produce a usable plan; using rule-based generation");
+            }
+            Err(e) => {
+                warn!("Unexpected error calling Ollama: {}. Using rule-based generation.", e);
+            }
+        }
         
         // Enhanced rule-based approach with better pattern matching
         let analysis = processor::LLMProcessor::extract_intent(description);
@@ -200,6 +429,7 @@ impl LLMProcessor {
         
         // Add user prompt as metadata
         plan.add_metadata("user_prompt".to_string(), serde_json::Value::String(description.to_string()));
+        plan.add_metadata("generated_by".to_string(), serde_json::Value::String("rule_based".to_string()));
         plan.add_metadata("scraping_type".to_string(), serde_json::Value::String(format!("{:?}", analysis.scraping_type)));
         plan.add_metadata("confidence".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(analysis.confidence as f64).unwrap()));
         

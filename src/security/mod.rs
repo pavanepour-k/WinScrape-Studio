@@ -132,21 +132,31 @@ impl SecurityManager {
     
     /// Check if address is internal/localhost
     fn is_internal_address(&self, host: &str) -> bool {
-        // Check for localhost variants
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+        if host.eq_ignore_ascii_case("localhost") {
             return true;
         }
         
-        // Check for private IP ranges
-        if host.starts_with("192.168.") || 
-           host.starts_with("10.") || 
-           host.starts_with("172.") {
-            return true;
-        }
-        
-        // Check for link-local addresses
-        if host.starts_with("169.254.") || host.starts_with("fe80:") {
-            return true;
+        // Prefer parsing as an actual IP address and using the standard
+        // library's RFC1918 (IPv4 private)/RFC4193 (IPv6 unique local)
+        // range checks. The previous implementation matched on string
+        // prefixes like "172." which incorrectly blocks the entire
+        // 172.0.0.0/8 range instead of just the private 172.16.0.0/12
+        // block - rejecting real public sites (e.g. many behind
+        // Cloudflare's 172.64.0.0/13, or hosts in Google's 172.217.x.x).
+        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            return match ip {
+                std::net::IpAddr::V4(v4) => {
+                    v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+                }
+                std::net::IpAddr::V6(v6) => {
+                    v6.is_loopback()
+                        || v6.is_unspecified()
+                        // Unique local (fc00::/7)
+                        || (v6.segments()[0] & 0xfe00) == 0xfc00
+                        // Link-local (fe80::/10)
+                        || (v6.segments()[0] & 0xffc0) == 0xfe80
+                }
+            };
         }
         
         false

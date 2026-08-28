@@ -3,6 +3,24 @@ use eframe::egui;
 #[cfg(feature = "ui")]
 use std::collections::HashMap;
 
+/// If `current_path` looks like an existing file, return its parent
+/// directory to open the picker dialog there; if it looks like an
+/// existing directory, return it directly. Returns `None` (dialog opens
+/// at the OS default location) when `current_path` is empty or doesn't
+/// resolve to anything on disk.
+#[cfg(feature = "ui")]
+fn starting_directory(current_path: &str) -> Option<std::path::PathBuf> {
+    if current_path.trim().is_empty() {
+        return None;
+    }
+    let path = std::path::Path::new(current_path);
+    if path.is_dir() {
+        Some(path.to_path_buf())
+    } else {
+        path.parent().filter(|p| p.is_dir()).map(|p| p.to_path_buf())
+    }
+}
+
 /// Windows-native UI components with Fluent Design
 #[cfg(feature = "ui")]
 pub struct WindowsComponents;
@@ -194,21 +212,46 @@ impl WindowsComponents {
         ui.add(button)
     }
     
-    /// Create a Windows-style file picker button
-    pub fn file_picker_button(ui: &mut egui::Ui, label: &str, current_path: &str) -> egui::Response {
+    /// Create a Windows-style file picker button. Clicking the icon opens
+    /// the native OS file picker (via `rfd`) and updates `current_path`
+    /// with the chosen file. Previously this button was purely decorative
+    /// and never opened any dialog.
+    pub fn file_picker_button(ui: &mut egui::Ui, label: &str, current_path: &mut String) -> egui::Response {
         ui.horizontal(|ui| {
             ui.label(label);
-            ui.add(egui::TextEdit::singleline(&mut current_path.to_string()).hint_text("Select file..."));
-            ui.button("📁")
+            ui.add(egui::TextEdit::singleline(current_path).hint_text("Select file..."));
+            let response = ui.button("📁");
+            if response.clicked() {
+                let mut dialog = rfd::FileDialog::new();
+                if let Some(dir) = starting_directory(current_path) {
+                    dialog = dialog.set_directory(dir);
+                }
+                if let Some(path) = dialog.pick_file() {
+                    *current_path = path.display().to_string();
+                }
+            }
+            response
         }).inner
     }
     
-    /// Create a Windows-style folder picker button
-    pub fn folder_picker_button(ui: &mut egui::Ui, label: &str, current_path: &str) -> egui::Response {
+    /// Create a Windows-style folder picker button. Clicking the icon
+    /// opens the native OS folder picker (via `rfd`) and updates
+    /// `current_path` with the chosen folder.
+    pub fn folder_picker_button(ui: &mut egui::Ui, label: &str, current_path: &mut String) -> egui::Response {
         ui.horizontal(|ui| {
             ui.label(label);
-            ui.add(egui::TextEdit::singleline(&mut current_path.to_string()).hint_text("Select folder..."));
-            ui.button("📂")
+            ui.add(egui::TextEdit::singleline(current_path).hint_text("Select folder..."));
+            let response = ui.button("📂");
+            if response.clicked() {
+                let mut dialog = rfd::FileDialog::new();
+                if let Some(dir) = starting_directory(current_path) {
+                    dialog = dialog.set_directory(dir);
+                }
+                if let Some(path) = dialog.pick_folder() {
+                    *current_path = path.display().to_string();
+                }
+            }
+            response
         }).inner
     }
     
@@ -345,8 +388,8 @@ impl WindowsComponents {
     pub fn dropdown(_ui: &mut eframe::egui::Ui, _label: &str, _selected: &mut String, _options: &[String]) -> eframe::egui::Response { eframe::egui::Response::default() }
     pub fn icon_button(_ui: &mut eframe::egui::Ui, _icon: &str, _text: &str) -> eframe::egui::Response { eframe::egui::Response::default() }
     pub fn action_button(_ui: &mut eframe::egui::Ui, _text: &str, _primary: bool) -> eframe::egui::Response { eframe::egui::Response::default() }
-    pub fn file_picker_button(_ui: &mut eframe::egui::Ui, _label: &str, _current_path: &str) -> eframe::egui::Response { eframe::egui::Response::default() }
-    pub fn folder_picker_button(_ui: &mut eframe::egui::Ui, _label: &str, _current_path: &str) -> eframe::egui::Response { eframe::egui::Response::default() }
+    pub fn file_picker_button(_ui: &mut eframe::egui::Ui, _label: &str, _current_path: &mut String) -> eframe::egui::Response { eframe::egui::Response::default() }
+    pub fn folder_picker_button(_ui: &mut eframe::egui::Ui, _label: &str, _current_path: &mut String) -> eframe::egui::Response { eframe::egui::Response::default() }
     pub fn loading_spinner(_ui: &mut eframe::egui::Ui, _text: &str) {}
     pub fn confirmation_dialog(_ui: &mut eframe::egui::Ui, _title: &str, _message: &str) -> Option<bool> { None }
     pub fn tooltip(_ui: &mut eframe::egui::Ui, _text: &str) {}

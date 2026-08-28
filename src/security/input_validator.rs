@@ -133,8 +133,17 @@ impl InputValidator {
     
     /// Check for repeated injection patterns
     fn has_repeated_injection_patterns(&self, input: &str) -> bool {
+        // Note: this used to also include "select", "delete", and "drop",
+        // but those are ordinary English words that a natural-language
+        // scraping description can easily repeat (e.g. "select the name,
+        // select the price, and select the rating" - three "select"s in
+        // a completely normal field description). The sequences below
+        // are unambiguous even in isolation, so repetition isn't needed
+        // to make them suspicious, but we still only escalate to a hard
+        // block when one recurs, to avoid flagging e.g. a single
+        // legitimate use of `--` in scraped-content descriptions.
         let suspicious_sequences = [
-            "''", "\"\"", "--", "/*", "*/", "union", "select", "drop", "delete",
+            "''", "\"\"", "--", "/*", "*/", "union select",
             "<script", "</script>", "javascript:", "eval(", "alert(", "confirm(",
         ];
         
@@ -151,7 +160,15 @@ impl InputValidator {
     fn compile_sql_patterns() -> Result<Vec<Regex>> {
         let patterns = vec![
             r"(?i)\bunion\s+select\b",
-            r"(?i)\bselect\s+.*\bfrom\b",
+            // Note: a plain `select ... from` pattern used to be included
+            // here, but this app's primary input is natural-language
+            // scraping descriptions, and phrases like "select the price
+            // from the page" or "select images from the gallery" are
+            // completely ordinary things a user would type - that pattern
+            // had a very real false-positive rate on legitimate input.
+            // The more specific SQL patterns below (actual SQL verbs
+            // combined with SQL-only syntax) still catch real injection
+            // attempts without that collision.
             r"(?i)\bdrop\s+table\b",
             r"(?i)\bdelete\s+from\b",
             r"(?i)\binsert\s+into\b",
@@ -179,7 +196,14 @@ impl InputValidator {
             r"(?i)javascript:",
             r"(?i)vbscript:",
             r"(?i)data:text/html",
-            r"(?i)on\w+\s*=",
+            // Inline event-handler attributes (onerror=, onclick=, ...).
+            // Requires an enclosing `<...>` tag and whitespace before
+            // "on" so this only matches an actual HTML attribute, not any
+            // text containing "on" followed by "=" - the previous pattern
+            // (`on\w+\s*=` with no tag requirement) matched ordinary
+            // phrases like "condition=new" or "pagination=true", which
+            // are completely normal in a scraping field description.
+            r"(?i)<[^>]+\son\w+\s*=",
             r"(?i)<iframe[^>]*>",
             r"(?i)<object[^>]*>",
             r"(?i)<embed[^>]*>",
@@ -213,7 +237,15 @@ impl InputValidator {
             r"&&\s*ls\s",
             r"\|\s*rm\s",
             r"\|\s*cat\s",
-            r"`.*`",
+            // Backtick command substitution. Narrowed to require at least
+            // two space-separated tokens inside the backticks (looking
+            // like an actual shell command with an argument, e.g.
+            // `` `cat /etc/passwd` ``) rather than any backtick-quoted
+            // text - a bare single token in backticks is a common way to
+            // reference a CSS selector or field name in a description
+            // (e.g. "extract text from `.product-title`"), which the
+            // previous unrestricted `` `.*` `` pattern would have blocked.
+            r"`[^`\n]*\s+[^`\n]*`",
             r"\$\(.*\)",
             r">\s*/dev/null",
             r"2>&1",
@@ -398,5 +430,42 @@ mod tests {
         assert!(!sanitized.contains('\0'));
         assert!(!sanitized.contains('\x01'));
         assert_eq!(sanitized, "testinputwithcontrolchars");
+    }
+    
+    /// Regression tests for false positives that used to block ordinary
+    /// natural-language scraping descriptions. This app's main input is
+    /// plain-English descriptions of what to scrape, so patterns that
+    /// collide with common phrasing are a real usability bug, not just a
+    /// theoretical concern.
+    #[test]
+    fn test_natural_language_descriptions_are_not_blocked() {
+        let config = create_test_config();
+        let validator = InputValidator::new(&config).unwrap();
+        
+        // "select ... from" is completely ordinary phrasing when
+        // describing what to scrape - it used to be flagged as SQL
+        // injection.
+        assert!(validator.validate("select the price from the page").is_ok());
+        assert!(validator.validate("select images from the gallery").is_ok());
+        
+        // Field/filter descriptions using "key=value" style, outside of
+        // any HTML tag, used to be flagged as XSS via a bare `on\w+=`
+        // pattern.
+        assert!(validator.validate("only include items where condition=new").is_ok());
+        assert!(validator.validate("filter by pagination=true").is_ok());
+        
+        // Describing several fields with "select" repeated 3+ times used
+        // to trip the repeated-injection-pattern check.
+        assert!(validator.validate(
+            "select the name, select the price, and select the rating for each item"
+        ).is_ok());
+        
+        // Referencing a CSS selector in backticks used to be flagged as
+        // command substitution.
+        assert!(validator.validate("extract text from `.product-title`").is_ok());
+        
+        // Genuine attacks should still be caught after these fixes.
+        assert!(validator.validate("<img src=x onerror=alert(1)>").is_err());
+        assert!(validator.validate("`cat /etc/passwd`").is_err());
     }
 }

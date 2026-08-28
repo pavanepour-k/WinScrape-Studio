@@ -257,6 +257,7 @@ mod tests {
             max_file_size_mb: 100,
             compression_enabled: false,
             output_directory: std::path::PathBuf::from("/tmp"),
+            include_metadata: true,
         };
         
         let stats = export_json(&data, output_path, &config).await.unwrap();
@@ -284,6 +285,7 @@ mod tests {
             max_file_size_mb: 100,
             compression_enabled: false,
             output_directory: std::path::PathBuf::from("/tmp"),
+            include_metadata: true,
         };
         
         let stats = export_jsonl(&data, output_path, &config).await.unwrap();
@@ -319,6 +321,7 @@ mod tests {
             max_file_size_mb: 100,
             compression_enabled: false,
             output_directory: std::path::PathBuf::from("/tmp"),
+            include_metadata: true,
         };
         
         let stats = export_json_with_metadata(&data, output_path, &metadata, &config).await.unwrap();

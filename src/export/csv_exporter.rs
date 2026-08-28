@@ -159,6 +159,7 @@ mod tests {
             max_file_size_mb: 100,
             compression_enabled: false,
             output_directory: std::path::PathBuf::from("/tmp"),
+            include_metadata: true,
         };
         
         let stats = export_csv(&data, output_path, &config).await.unwrap();
@@ -185,6 +186,7 @@ mod tests {
             max_file_size_mb: 100,
             compression_enabled: false,
             output_directory: std::path::PathBuf::from("/tmp"),
+            include_metadata: true,
         };
         
         let stats = export_csv(&data, output_path, &config).await.unwrap();
@@ -218,6 +220,7 @@ mod tests {
             max_file_size_mb: 100,
             compression_enabled: false,
             output_directory: std::path::PathBuf::from("/tmp"),
+            include_metadata: true,
         };
         
         let stats = export_csv(&data, output_path, &config).await.unwrap();

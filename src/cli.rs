@@ -11,6 +11,8 @@ mod dsl;
 mod export;
 mod security;
 mod utils;
+#[cfg(feature = "api")]
+mod api;
 
 use crate::core::WinScrapeStudio;
 use crate::config::AppConfig;

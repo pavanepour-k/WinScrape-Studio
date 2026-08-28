@@ -32,6 +32,38 @@ pub struct LLMConfig {
     pub temperature: f32,
     pub max_tokens: usize,
     pub threads: usize,
+    /// Whether to attempt real LLM-based DSL generation via a local
+    /// Ollama server before falling back to the rule-based keyword
+    /// matcher. Ollama (https://ollama.com) and its models are free and
+    /// run entirely on the user's own machine - no API key or per-call
+    /// cost. If Ollama isn't installed/running, or a request fails for
+    /// any reason, generation transparently falls back to the rule-based
+    /// approach rather than failing the whole request.
+    pub enable_ollama: bool,
+    /// Base URL of the local Ollama server (default install listens on
+    /// localhost:11434).
+    pub ollama_url: String,
+    /// Model name to request from Ollama, e.g. "llama3.2" or "qwen2.5".
+    /// The user must have pulled this model themselves (`ollama pull
+    /// <model>`) - this app doesn't download models on its own.
+    pub ollama_model: String,
+    /// Request timeout in seconds for a single Ollama call. Local
+    /// inference on modest hardware can be slow, especially for the
+    /// first request after the model is loaded into memory.
+    pub ollama_timeout_seconds: u64,
+    /// Whether to attempt in-process GGUF inference via candle (only
+    /// compiled in when built with `--features local-llm`). Tried before
+    /// Ollama, and falls back the same way if the model file is missing,
+    /// unsupported, or generation fails for any reason. `model_path`
+    /// above is the GGUF file to load; the model's tokenizer is read
+    /// from the same GGUF file (llama.cpp-style BPE/"gpt2" tokenizer
+    /// metadata is required - most current Llama 3.x/Qwen2.x/Mistral
+    /// GGUF conversions satisfy this, but older SentencePiece-tokenizer
+    /// GGUFs like the original Llama 2 conversions do not).
+    pub enable_candle: bool,
+    /// Random seed for candle's sampler. Fixed by default for
+    /// reproducible output; set to a random value if variety is wanted.
+    pub candle_seed: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +85,7 @@ pub struct ExportConfig {
     pub max_file_size_mb: usize,
     pub compression_enabled: bool,
     pub output_directory: PathBuf,
+    pub include_metadata: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +118,9 @@ pub struct UIConfig {
     pub window_height: f32,
     pub enable_dark_mode: bool,
     pub chat_history_limit: usize,
+    pub auto_save: bool,
+    pub enable_notifications: bool,
+    pub minimize_to_tray: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +149,12 @@ impl Default for AppConfig {
                 temperature: 0.1,
                 max_tokens: 512,
                 threads: 4,
+                enable_ollama: true,
+                ollama_url: "http://localhost:11434".to_string(),
+                ollama_model: "llama3.2".to_string(),
+                ollama_timeout_seconds: 30,
+                enable_candle: false,
+                candle_seed: 299792458,
             },
             scraping: ScrapingConfig {
                 max_concurrent_requests: 5,
@@ -134,6 +176,7 @@ impl Default for AppConfig {
                 max_file_size_mb: 100,
                 compression_enabled: true,
                 output_directory: data_dir.join("exports"),
+                include_metadata: true,
             },
             security: SecurityConfig {
                 enable_input_validation: true,
@@ -167,6 +210,9 @@ impl Default for AppConfig {
                 window_height: 800.0,
                 enable_dark_mode: true,
                 chat_history_limit: 100,
+                auto_save: true,
+                enable_notifications: true,
+                minimize_to_tray: false,
             },
             logging: LoggingConfig {
                 level: "info".to_string(),
@@ -184,14 +230,24 @@ impl AppConfig {
     pub async fn load() -> Result<Self> {
         let config_path = get_config_path();
         
-        if config_path.exists() {
-            Self::load_from_file(&config_path).await
+        let mut config = if config_path.exists() {
+            Self::load_from_file(&config_path).await?
         } else {
             info!("No configuration file found, using defaults");
             let config = Self::default();
             config.save().await?;
-            Ok(config)
-        }
+            config
+        };
+        
+        // Apply WSS_* environment variable overrides on top of the file/
+        // default config. This was previously defined (ConfigOverrides)
+        // but never actually invoked, so none of the documented env vars
+        // (WSS_DB_PATH, WSS_LLM_MODEL_PATH, WSS_SCRAPING_CONCURRENT, ...)
+        // had any effect.
+        ConfigOverrides::apply(&mut config);
+        config.validate()?;
+        
+        Ok(config)
     }
     
     /// Load configuration from specific file
@@ -328,6 +384,18 @@ impl ConfigOverrides {
             if let Ok(temp) = temp_str.parse::<f32>() {
                 config.llm.temperature = temp;
             }
+        }
+        
+        if let Ok(enable_str) = std::env::var("WSS_OLLAMA_ENABLE") {
+            config.llm.enable_ollama = enable_str.to_lowercase() == "true";
+        }
+        
+        if let Ok(ollama_url) = std::env::var("WSS_OLLAMA_URL") {
+            config.llm.ollama_url = ollama_url;
+        }
+        
+        if let Ok(ollama_model) = std::env::var("WSS_OLLAMA_MODEL") {
+            config.llm.ollama_model = ollama_model;
         }
         
         // Scraping overrides

@@ -10,7 +10,6 @@ use crate::core::orchestrator::{WorkflowResult, PendingApproval};
 pub struct UIState {
     pub current_view: View,
     pub jobs: Vec<JobInfo>,
-    pub settings: UISettings,
     #[serde(skip)]
     pub current_workflow: Option<WorkflowState>,
     #[serde(skip)]
@@ -27,7 +26,6 @@ impl UIState {
         Self {
             current_view: View::Chat,
             jobs: Vec::new(),
-            settings: UISettings::default(),
             current_workflow: None,
             pending_approval: None,
             status_message: None,
@@ -68,34 +66,6 @@ pub enum JobStatus {
     Completed,
     Failed,
     Cancelled,
-}
-
-/// UI settings
-#[cfg(feature = "ui")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UISettings {
-    pub max_concurrent_requests: usize,
-    pub request_timeout: u64,
-    pub respect_robots_txt: bool,
-    pub enable_browser_fallback: bool,
-    pub default_export_format: String,
-    pub enable_input_validation: bool,
-    pub enable_output_filtering: bool,
-}
-
-#[cfg(feature = "ui")]
-impl Default for UISettings {
-    fn default() -> Self {
-        Self {
-            max_concurrent_requests: 5,
-            request_timeout: 30,
-            respect_robots_txt: true,
-            enable_browser_fallback: false,
-            default_export_format: "csv".to_string(),
-            enable_input_validation: true,
-            enable_output_filtering: true,
-        }
-    }
 }
 
 /// Workflow execution state

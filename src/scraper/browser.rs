@@ -23,7 +23,25 @@ pub struct BrowserClient {
     playwright: Playwright,
 }
 
-// Ensure BrowserClient is Send + Sync
+// SAFETY: `playwright::Playwright` (and the `Browser`/`BrowserContext`/
+// `Page` objects it produces) are not auto-Send/Sync because the crate
+// doesn't derive/declare it, but source review of playwright 0.0.20
+// (see Cargo.lock for the pinned version) found no actual thread-unsafe
+// interior mutability reachable from these types:
+//   - `Playwright`, `Browser`, `Page`, `BrowserContext`, and every other
+//     API object share the common `ChannelOwner` base, which is built
+//     entirely from `Weak<Mutex<Context>>`, `Mutex<Vec<RemoteWeak>>`,
+//     and similar `Arc`/`Weak`/`Mutex`/`AtomicBool` primitives.
+//   - The *only* `Rc`/`RefCell` usage in the whole crate
+//     (`src/imp/core/message/ser.rs::Serializer`) is a purely synchronous
+//     helper used inside `to_value()` for message serialization; it's
+//     never stored in any long-lived struct and never crosses an
+//     `.await` point, so it can't make these public types thread-unsafe.
+// This was verified by downloading and grepping the actual crate source
+// (`Rc<`, `RefCell`, `Cell<`, raw pointers) rather than assumed - if the
+// `playwright` dependency version ever changes, re-audit before trusting
+// this again, since a future version could introduce real interior
+// mutability.
 #[cfg(feature = "browser")]
 unsafe impl Send for BrowserClient {}
 #[cfg(feature = "browser")]
